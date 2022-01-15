@@ -15,9 +15,9 @@ If the alignments are hg19, I recommend using only Polysolver. Since that can ru
 ###### Setting up the Pipeline #######
 
 The pipeline is controlled by the file config/config.yaml where paths/options should be specified.
-Cluster interaction is controlled from the config/slurm/ folder
-Cluster.yaml --> needs your cluster profile 
-Config.yaml --> controls your snakemake profile (standard options)
+Cluster interaction is controlled by your personal snakemake profile
+See: https://github.com/Snakemake-Profiles
+
 
 Time/memory usage can be specified in the snakemake file or in the command line
 
@@ -45,15 +45,15 @@ Sample_ID --> Name of samples, will be used as output names
 Bam_file_name --> Name of the bam file for that sample. 
 	PATH_BAMS_ABSOLUTE + bam_file_name is used to access files
 Race --> race of individual {Caucasian, Black, Asian, Unknown}
-	If there is no Race column Unknown is used by default 
+	If there is no Race column, Unknown is used by default 
 
-NOTE --> the pipeline drops any row with a NA value in any col!!!
+NOTE --> the pipeline drops any row with a NA value in any col!
 
 ###### RUNNING THE PIPELINE ######
 
 Run from conda enviroment with snakemake installed (tested for 6.8.0)
 As normal snakemake pipeline:
-$snakemake –profile config/slurm -j1
+$snakemake –profile your/profile -j1
 
 NOTE 
 It seems that calling many jobs in parallel on the cluster can result in "communication errors", where temporary files are not created etc. This either result in a crash or a stall.
@@ -64,17 +64,35 @@ Reruning the failed jobs (by rerunning snakemake) seems to sovle the problems
 
 You should check the consensus_call-xxxxxxxxx.out log file. 
 This describes if all variants are called via majority vote or if the have defaulted to polysolver
-In very rare cases the default polysolver output is not allowed input for netMHCpan 
+In very rare cases the default polysolver output is not allowed as input for netMHCpan 
 --> these require manual adjustment to fix. The log file will point to these
 
 ###### INSTALLING IMAGES ######
 
 POLYSOLVER
-Has been ported to singularity, with a few bug fixes and changes see:
-https://github.com/IARCbioinfo/polysolver-singularity
-This image can be dowloaded by running 
-$singularity pull shub://IARCbioinfo/polysolver-singularity:v4
-it should be named polysolver-singularity_v4.sif
+Has been ported to singularity, with a few bug fixes and changes.
+using the following build file:
+
+"""
+Bootstrap: docker
+From: sachet/polysolver:v4
+%post
+    mkdir /data
+    sed -i 's.#!/bin/sh.#!/bin/bash.g' /home/polysolver/scripts/shell_call_hla_type
+    sed -i 's.TMP_DIR=\$outDir.TMP_DIR=/tmp.g' /home/polysolver/scripts/shell_call_hla_type
+    sed -i 's.TMP_DIR=/home/polysolver.TMP_DIR=/tmp.g' /home/polysolver/scripts/shell_call_hla_type
+    sed -i 's.\$SAMTOOLS_DIR./home/polysolver/binaries.g' /home/polysolver/scripts/shell_call_hla_type
+    sed -i 's.6:29941260-29945884.chr6:29941260-29945884.g' /home/polysolver/scripts/shell_call_hla_type
+    sed -i 's.6:31353872-31357187.chr6:31353872-31357187.g' /home/polysolver/scripts/shell_call_hla_type
+    sed -i 's.6:31268749-31272105.chr6:31268749-31272105.g' /home/polysolver/scripts/shell_call_hla_type
+    sed -i 's.6:29909037-29913661.chr6:29909037-29913661.g' /home/polysolver/scripts/shell_call_hla_type
+    sed -i 's.6:31321649-31324964.chr6:31321649-31324964.g' /home/polysolver/scripts/shell_call_hla_type
+    sed -i 's.6:31236526-31239869.chr6:31236526-31239869.g' /home/polysolver/scripts/shell_call_hla_type
+"""
+
+run:
+$sudo singularity build polysolver-singularity.sif build_file_name
+ 
 
 xHLA
 Has not been ported to singularity, but building it directly from docker works
@@ -91,4 +109,6 @@ $singularity build xhla.sif xhla/
 OptiType
 Has not been ported to singularity, but building it directly from docker works
 $singularity build optitype.sif docker://humanlongevity/hlafred2/optitype
-:-)
+
+
+Good Luck :-)
