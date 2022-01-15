@@ -1,0 +1,298 @@
+import os
+import sys
+import pandas as pd
+configfile: "config/config.yaml"
+
+
+###   setup and cleanup ###
+ 
+onstart:
+	if not os.path.isdir("results"):
+		os.mkdir("results")
+	os.system("rm -r tmp") #remove previous tmp
+	os.mkdir("tmp") 
+	#this lines moves old logs into a subfolder. this makes debugging much easier
+	os.system("mkdir -p logs/old; mv logs/*.{err,out} logs/old 2> /dev/null") #move logs, for convinience 
+
+	if not os.path.isfile("polysolver-singularity_v4.sif") and config["USE_POLYSOLVER"]:
+		print("POLYSOLVER singularity image is missing or not named polysolver-singularity_v4.sif")
+		sys.exit()
+	if not os.path.isfile("xhla.sif") and config["USE_XHLA"]:
+		print("xHLA singularity image is missing or not named xHLA.sif")
+		sys.exit()
+	if not os.path.isfile("optitype.sif") and config["USE_OPTITYPE"]:
+		print("OptiType missing or not called optitype.sif")
+		sys.exit()
+
+#remove tmp after runs
+onerror:
+	os.system("rm -r tmp")
+onsuccess:
+	os.system("rm -r tmp")
+
+
+
+##### GETTING SAMPLE LIST ########
+
+sample_df = pd.read_csv(config["SAMPLE_FILE"], sep = "\t", dtype = str)
+#Removing rows with NA values (in any col)
+sample_df  = sample_df.dropna()
+sample_list = sample_df["Sample_ID"].to_list()
+
+
+
+############ FUNCTION FOR GETTING RACE AND FILE LOCATION ########
+
+def get_race(wildcards):
+	#Extracts race value from samples.tsv. returns Unknown if no race is provided 
+	if "Race" in sample_df.columns:
+		return sample_df.loc[sample_df['Sample_ID'] == wildcards.sample, "Race"].iloc[0] 
+	else:
+		print("No Race data provided, defaulting to Unknown")
+		return "Unknown"
+
+def extract_from_sample(col_name , suffix = ""):
+	"""
+	Function that can extract a datapoint from samples.tsv
+	col_name specifies column
+	Inner function then excract a the row where {sample} is located
+	"""
+	def input_func(wildcards):
+		return suffix + sample_df.loc[sample_df['Sample_ID'] == wildcards.sample, col_name].iloc[0] 
+	return input_func
+
+
+########### RULES #############
+
+localrules: all, softlink_BAMS #, index_BAMS  #unhash this and run --until index_BAMS on a node (for speed)
+
+#rule all depends on if all callers  are used
+final_out = "results/consensus_calls.tsv" if config["USE_POLYSOLVER"] and config["USE_XHLA"] and config["USE_OPTITYPE"] else "results/calls.tsv"
+
+rule all: input: final_out
+
+
+get_bam_path = extract_from_sample("Bam_file_name",config["PATH_BAMS_ABSOLUTE"]+"/" )
+#this one runs on local machine
+rule softlink_BAMS:
+	#If bams are located outside data/bam_files/ they will be softlinked there
+	input:
+		get_bam_path
+	output:
+		"results/bam_files/{sample}.bam"
+	shell:
+		"ln -s {input[0]} {output[0]}"
+
+
+
+rule index_BAMS:
+	#This step indexes all the bam files
+	input:
+		"results/bam_files/{sample}.bam"
+	output:
+		"results/bam_files/{sample}.bam.bai"
+	conda:
+		"envs/samtools.yaml"
+	shell: """
+		samtools index {input[0]} {output[0]}
+	"""
+
+#NOTE before each call job we sleep a random amount
+#this should desycronize the loading of files and
+#hopefully reduce the amount of crashes due to freezing
+#when working with very many simultanious calls
+
+rule POLYSOLVER:
+	#Calls polysolver 
+	#see polysolver documentation for longer explanations of input
+	#NOTE --> creates tmp folder tmp/tmp_{sample} that is deleted after succesfull run
+	threads: 2
+	resources:
+		walltime="2:30:00",  #takes 40 min with sliced bam, but sometimes takes longer
+		mem_mb=8092,
+	input:
+		"results/bam_files/{sample}.bam",
+		"results/bam_files/{sample}.bam.bai"
+	output:
+		"results/polysolver/calls/winners.hla.{sample}.txt"
+	params:
+		path_results = "results/polysolver/calls",
+		path_bams = "results/bam_files",
+		path_bams_absolute = config["PATH_BAMS_ABSOLUTE"],
+		sample_name = "{sample}.bam",
+		hg_build = config["HG_BUILD"],
+		use_allele_freq = config["USE_ALLELE_FREQ"],
+		race =  get_race,
+		fastq_format =config["FASTQ_FORMAT"],
+		insert_calc = config["INSERT_CALC"],
+		tmp_dir = "tmp/tmp_poly_" + "{sample}",
+	shell: """
+		sleep $[ ( $RANDOM % 120 ) + 1 ]s
+		mkdir -p {params.tmp_dir}
+		singularity exec -C \
+			-B {params.path_bams_absolute}\
+			-B {params.path_bams}:/data \
+			-B {params.tmp_dir}:/tmp \
+			polysolver-singularity_v4.sif\
+				/home/polysolver/scripts/shell_call_hla_type\
+				/data/{params.sample_name} \
+				{params.race} \
+				{params.use_allele_freq} \
+				{params.hg_build} \
+				{params.fastq_format} \
+				{params.insert_calc} \
+				/tmp
+		cp {params.tmp_dir}/winners.hla.txt {params.path_results}/winners.hla.{wildcards.sample}.txt
+		"""
+
+rule xHLA:
+	#calls xHLA
+	threads: 1
+	resources:
+		walltime="1:00:00",
+		mem_mb = 8092,
+		# walltime="2:00:00",  #run with this if you get OOM fails
+		# mem_mb = 20092,
+	input:
+		"results/bam_files/{sample}.bam",
+		"results/bam_files/{sample}.bam.bai"
+	output:
+		"results/xhla/calls/report-{sample}-hla.json"
+	params:
+		path_results = "results/xhla/calls",
+		path_sample = "results/bam_files/{sample}.bam",
+		path_bams_absolute = config["PATH_BAMS_ABSOLUTE"],
+		sample = "{sample}",
+		path_wd = config["PATH_WD"] + "/tmp"
+	shell: """
+		sleep $[ ( $RANDOM % 60 )  + 1 ]s
+		cd tmp && \
+		singularity run  \
+			-B {params.path_bams_absolute} \
+			-B {params.path_wd}:{params.path_wd} \
+			-W {params.path_wd} \
+			../xhla.sif \
+			--sample_id {wildcards.sample} \
+			--input_bam_path ../{params.path_sample} \
+   			--output_path ../{params.path_results}
+		"""
+
+
+
+rule optitype:
+	#First converts BAM file to 2 fq files, then runs optitype
+	#fq files are removed after each call --> to not use extreme amounts of storage during large workflows
+	threads: 1
+	resources:
+		walltime="1:00:00",
+		mem_mb = 8092
+	conda:
+		"envs/samtools.yaml"
+	input:
+		"results/bam_files/{sample}.bam"
+	output:
+		"results/optitype/calls/{sample}_result.tsv"
+	params:
+		path_results = "results/optitype/calls",
+		tmp = "tmp/tmp_opti_{sample}",
+		path_bams = "results/bam_files",
+		sample = "{sample}.bam",
+		sample_name = "{sample}",
+	shell: """
+		sleep $[ ( $RANDOM % 60 )  + 1 ]s
+		mkdir -p {params.tmp}/
+		samtools collate -u {params.path_bams}/{params.sample_name}.bam -o {params.tmp}/{params.sample_name}_sorted.bam
+		samtools fastq {params.tmp}/{params.sample_name}_sorted.bam -1 {params.tmp}/{params.sample_name}_1.fq -2 {params.tmp}/{params.sample_name}_2.fq -0 /dev/null -s /dev/null -n
+		singularity run  \
+		optitype.sif \
+			-i {params.tmp}/{params.sample_name}_1.fq {params.tmp}/{params.sample_name}_2.fq \
+			-d \
+			-p {params.sample_name} \
+			-o {params.tmp}/ \
+			-v
+		cp {params.tmp}/{params.sample_name}_result.tsv  {params.path_results}/{params.sample_name}_result.tsv
+		rm {params.tmp}/{params.sample_name}_sorted.bam
+		rm {params.tmp}/{params.sample_name}_1.fq
+		rm {params.tmp}/{params.sample_name}_2.fq
+		"""
+
+	#single end mode:
+	# samtools fastq {params.path_bams}{params.sample_name}.bam > {params.tmp}/{params.sample_name}.fq
+	#-i {params.tmp}/{params.sample_name}.fq \
+
+rule merge_polysolver_calls:
+	#takes the individual call files and stores them in dataframe
+	#note original and formated HLA types are both saved
+	input:
+		file_list = expand("results/polysolver/calls"+"/winners.hla.{sample_name}.txt", \
+				sample_name = sample_list)
+	output:
+		full ="results/polysolver/calls_full.tsv",
+		formated="results/polysolver/calls_formated.tsv"
+	params:
+		sample_list = sample_list
+	script:
+		"scripts/merge_polysolver_calls.py"
+
+rule merge_xhla_calls:
+	#takes the individual call files and stores them in dataframe
+	#note original and formated HLA types are both saved
+	input: 
+		file_list = expand("results/xhla/calls/report-{sample_name}-hla.json", \
+				sample_name = sample_list)
+	output:
+		formated = "results/xhla/calls_formated.tsv",
+		full = "results/xhla/calls_full.tsv"
+	params:
+		sample_list = sample_list
+	script:
+		"scripts/merge_xhla_calls.py"
+
+rule merge_optitype_calls:
+	input: 
+		file_list = expand("results/optitype/calls/{sample_name}_result.tsv", \
+				sample_name = sample_list)
+	output:
+		formated = "results/optitype/calls_formated.tsv",
+		full = "results/optitype/calls_full.tsv"
+	params:
+		sample_list = sample_list
+	script:
+		"scripts/merge_optitype_calls.py"
+
+
+#Creating input for the merge function
+#we cannot merge something thas doesn't exist
+merge_all_input = []
+if config["USE_POLYSOLVER"]:
+	merge_all_input.append("results/polysolver/calls_formated.tsv")
+if config["USE_XHLA"]:
+	merge_all_input.append("results/xhla/calls_formated.tsv")
+if config["USE_OPTITYPE"]:
+	merge_all_input.append("results/optitype/calls_formated.tsv")
+
+rule merge_all:
+	#merges all data frames 
+	resources:
+		walltime="0:30:00"
+	input:
+		merge_all_input
+	output:
+		"results/calls.tsv"
+	script:
+		"scripts/merge_all.py"
+
+
+#if config["USE_POLYSOLVER"] and config["USE_XHLA"] and config["USE_OPTITYPE"]:
+rule consensus_call:
+	#Do consensus vote
+	resources:
+		walltime="0:30:00"
+	input:
+		calls = "results/calls.tsv",
+		allowed = "config/MHC_allele_names.txt"
+	output:
+		"results/consensus_calls.tsv"
+	script:
+		"scripts/consensus_vote.py"
+
