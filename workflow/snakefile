@@ -201,7 +201,7 @@ rule optitype:
 	shell: """
 		sleep $[ ( $RANDOM % 60 )  + 1 ]s
 		mkdir -p {params.tmp}/
-		samtools collate -u {params.path_bams}/{params.sample_name}.bam -o {params.tmp}/{params.sample_name}_sorted.bam
+		samtools collate -u {params.path_bams}/{params.sample_name}.bam -o {params.tmp}/{params.sample_name}_sorted.bam {params.tmp}
 		samtools fastq {params.tmp}/{params.sample_name}_sorted.bam -1 {params.tmp}/{params.sample_name}_1.fq -2 {params.tmp}/{params.sample_name}_2.fq -0 /dev/null -s /dev/null -n
 		singularity run  \
 		optitype.sif \
