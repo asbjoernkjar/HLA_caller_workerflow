@@ -1,0 +1,13 @@
+#ignore useless OS created files 
+*.DS_Store
+._*
+
+#folders to ignore
+.snakemake
+logs
+results*
+temp
+tmp 
+
+
+

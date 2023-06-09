@@ -1,29 +1,30 @@
+sample_file: /faststorage/home/askj/pipeline_testing/misc/TCGA_test_wide.tsv
+sample_col: Sample_ID
+bam_col: germline_path
 
-#note --> use readlink -f file.bam --> to get true path
-#PATH to folder with bams 
-PATH_BAMS_ABSOLUTE: /faststorage/project/CancerEvolution/Projects/asbjorn_nags/sting_cgas_TCGA/data/intermediate_files/chr6_slices 
-#absolute path to working directory
-PATH_WD: /faststorage/project/CancerEvolution/Projects/asbjorn_nags/template_scripts/HLA_caller_workflow
-#sample file path
-SAMPLE_FILE: /faststorage/project/CancerEvolution/Projects/asbjorn_nags/data/TCGA_sub/file_id/samples.tsv
+
 
 ##### POLYSOLVER ######
+polysolver_singularity_path: /faststorage/project/CancerEvolution/Projects/ak_projects/refs/HLA/polysolver-singularity.sif
 
-USE_POLYSOLVER: true
-#RACE                       #RACE in samples.tsv, default = unknown
+#RACE                      #RACE in samples.tsv, default = unknown
 USE_ALLELE_FREQ: "1"       #flag indicating whether population-level allele frequencies should be used as priors (0 or 1)
 HG_BUILD: "hg38"           #reference genome used in the BAM file (hg18, hg19 or hg38)
 FASTQ_FORMAT: "STDFQ"      #(STDFQ, ILMFQ, ILM1.8 or SLXFQ; see Novoalign documentation) (probably STDFQ)
 INSERT_CALC: "0"           #flag indicating whether empirical insert size distribution should be used in the model (0 or 1) (standard is 0)
+RACE_COL: null
+
+
+
+####### consensus vote #######
+consensus_vote: True
 
 ####### xHLA #######
+xhla_singularity_path: /faststorage/project/CancerEvolution/Projects/ak_projects/refs/HLA/xhla.sif
 
-USE_XHLA: true
 
 ####### OptiType #####
-
-USE_OPTITYPE: true
-
+optitype_singularity_path: /faststorage/project/CancerEvolution/Projects/ak_projects/refs/HLA/optitype.sif
 
 
 

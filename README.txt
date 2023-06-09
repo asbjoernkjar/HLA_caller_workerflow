@@ -23,31 +23,20 @@ Time/memory usage can be specified in the snakemake file or in the command line
 
 ### BAMS ###
 
-Feeding BAM files to the program there are two options
+bam paths should not be softlinks 
 
-Putting the .bam files in results/bam_files
-config file should then be fed following path:
-	PATH_BAMS_ABSOLUTE: "results/bam_files"
-
-Accessing the files in some other folder, so you don't have to move them
-
-PATH_BAMS_ABSOLUTE: /absolute/path/to/bam_folder
-
-The files will be softlinked into results/bam_files
-HOWEVER: singularity needs to be mounted with the origin folder, to acces the files
-NOTE: the TRUE absolute path might be different than pwd
-	use $readlink -f folder 
 
 ### Sample_File ###
 
 The samples are specified by csv file. It should have the following columns:
-Sample_ID --> Name of samples, will be used as output names
-Bam_file_name --> Name of the bam file for that sample. 
-	PATH_BAMS_ABSOLUTE + bam_file_name is used to access files
-Race --> race of individual {Caucasian, Black, Asian, Unknown}
-	If there is no Race column, Unknown is used by default 
+sample_col: 
+bam_col: 
 
-NOTE --> the pipeline drops any row with a NA value in any col!
+
+RACE_COL --> race of individual {Caucasian, Black, Asian, Unknown}
+	If there is no Race column, Unknown is used by default 
+    set RACE_COL: null
+
 
 ###### RUNNING THE PIPELINE ######
 
@@ -64,7 +53,6 @@ Reruning the failed jobs (by rerunning snakemake) seems to sovle the problems
 
 You should check the consensus_call-xxxxxxxxx.out log file. 
 This describes if all variants are called via majority vote or if the have defaulted to polysolver
-In very rare cases the default polysolver output is not allowed as input for netMHCpan 
 --> these require manual adjustment to fix. The log file will point to these
 
 ###### INSTALLING IMAGES ######
